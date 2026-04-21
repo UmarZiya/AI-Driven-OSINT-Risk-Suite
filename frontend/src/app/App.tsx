@@ -1,37 +1,56 @@
 import { useState, useEffect } from 'react';
+import { AuthPage } from './components/AuthPage';
 import { Dashboard } from './components/Dashboard';
 import { ScanInterface } from './components/ScanInterface';
 import { ScanReport } from './components/ScanReport';
 import { ScanHistory } from './components/ScanHistory';
-import { performOSINTScan } from './utils/osintEngine';
+import { performOSINTScan, fetchScanById } from './utils/osintEngine';
 import type { ScanTarget, ScanResult } from './types';
 
 type View = 'dashboard' | 'scan' | 'report' | 'history';
 
+interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
 export default function App() {
+  const [user, setUser] = useState<User | null>(null);
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [currentScan, setCurrentScan] = useState<ScanResult | null>(null);
-  const [scanResults, setScanResults] = useState<Map<string, ScanResult>>(new Map());
 
-  const handleStartScan = () => {
-    setCurrentView('scan');
+  useEffect(() => {
+    const token = localStorage.getItem('osint_token');
+    const userData = localStorage.getItem('osint_user');
+    if (token && userData) {
+      setUser(JSON.parse(userData));
+    }
+  }, []);
+
+  const handleAuth = (token: string, userData: User) => {
+    localStorage.setItem('osint_token', token);
+    localStorage.setItem('osint_user', JSON.stringify(userData));
+    setUser(userData);
   };
 
-  const handleScanStart = async (target: ScanTarget) => {
-    // This will be called when the scan actually starts
-    // The actual OSINT scan will be performed
+  const handleLogout = () => {
+    localStorage.removeItem('osint_token');
+    localStorage.removeItem('osint_user');
+    setUser(null);
+    setCurrentView('dashboard');
+  };
+
+  const handleStartScan = () => setCurrentView('scan');
+
+  const handleScanStart = async (target: ScanTarget): Promise<string> => {
     const result = await performOSINTScan(target);
-    setScanResults(prev => new Map(prev).set(result.id, result));
     setCurrentScan(result);
+    return result.id;
   };
 
   const handleScanComplete = (scanId: string) => {
-    // When scan completes, show the report
-    const result = scanResults.get(scanId);
-    if (result) {
-      setCurrentScan(result);
-      setCurrentView('report');
-    }
+    if (scanId) setCurrentView('report');
   };
 
   const handleBackToDashboard = () => {
@@ -39,27 +58,29 @@ export default function App() {
     setCurrentScan(null);
   };
 
-  const handleViewHistory = () => {
-    setCurrentView('history');
-  };
+  const handleViewHistory = () => setCurrentView('history');
 
-  const handleViewReport = (scanId: string) => {
-    // In a real app, this would fetch the scan from a database
-    // For now, we'll create a mock scan
-    const mockScan = scanResults.get(scanId);
-    if (mockScan) {
-      setCurrentScan(mockScan);
+  const handleViewReport = async (scanId: string) => {
+    const result = await fetchScanById(scanId);
+    if (result) {
+      setCurrentScan(result);
       setCurrentView('report');
-    } else {
-      // Generate a new mock scan for history items
-      handleStartScan();
     }
   };
+
+  if (!user) {
+    return <AuthPage onAuth={handleAuth} />;
+  }
 
   return (
     <>
       {currentView === 'dashboard' && (
-        <Dashboard onStartScan={handleStartScan} onViewHistory={handleViewHistory} />
+        <Dashboard
+          onStartScan={handleStartScan}
+          onViewHistory={handleViewHistory}
+          onLogout={handleLogout}
+          user={user}
+        />
       )}
       {currentView === 'scan' && (
         <ScanInterface
@@ -69,16 +90,10 @@ export default function App() {
         />
       )}
       {currentView === 'report' && currentScan && (
-        <ScanReport
-          scan={currentScan}
-          onBack={handleBackToDashboard}
-        />
+        <ScanReport scan={currentScan} onBack={handleBackToDashboard} />
       )}
       {currentView === 'history' && (
-        <ScanHistory
-          onBack={handleBackToDashboard}
-          onViewReport={handleViewReport}
-        />
+        <ScanHistory onBack={handleBackToDashboard} onViewReport={handleViewReport} />
       )}
     </>
   );

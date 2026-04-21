@@ -10,48 +10,60 @@ import type { ScanTarget } from '../types';
 interface ScanInterfaceProps {
   onScanComplete: (scanId: string) => void;
   onBack: () => void;
-  onScanStart: (target: ScanTarget) => void;
+  onScanStart: (target: ScanTarget) => Promise<string>;
 }
+
+const PHASES = [
+  { name: 'Initializing OSINT modules...', progress: 10 },
+  { name: 'Querying breach databases...', progress: 25 },
+  { name: 'Performing WHOIS lookup...', progress: 40 },
+  { name: 'Scanning network exposure...', progress: 55 },
+  { name: 'Analyzing social media presence...', progress: 70 },
+  { name: 'Running NLP threat analysis...', progress: 85 },
+  { name: 'Computing risk score...', progress: 95 },
+];
 
 export function ScanInterface({ onScanComplete, onBack, onScanStart }: ScanInterfaceProps) {
   const [target, setTarget] = useState<ScanTarget>({});
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [currentPhase, setCurrentPhase] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const hasTarget = !!(target.email || target.domain || target.username || target.ipAddress);
 
   const handleStartScan = async () => {
-    if (!target.email && !target.domain && !target.username && !target.ipAddress) {
-      return;
-    }
+    if (!hasTarget) return;
 
     setIsScanning(true);
     setScanProgress(0);
-    
-    onScanStart(target);
+    setError(null);
 
-    // Simulate scan phases
-    const phases = [
-      { name: 'Initializing OSINT modules...', duration: 500, progress: 10 },
-      { name: 'Querying breach databases...', duration: 1000, progress: 25 },
-      { name: 'Performing WHOIS lookup...', duration: 800, progress: 40 },
-      { name: 'Scanning network exposure (Shodan)...', duration: 1200, progress: 55 },
-      { name: 'Analyzing social media presence...', duration: 900, progress: 70 },
-      { name: 'Extracting EXIF metadata...', duration: 600, progress: 80 },
-      { name: 'Running NLP threat analysis...', duration: 1000, progress: 90 },
-      { name: 'Computing ML risk score...', duration: 800, progress: 100 },
-    ];
+    // Run progress animation concurrently with the real API call
+    const animateProgress = async () => {
+      const stepMs = 2500; // spread animation over ~17s (7 phases × ~2.5s)
+      for (const phase of PHASES) {
+        setCurrentPhase(phase.name);
+        setScanProgress(phase.progress);
+        await new Promise(r => setTimeout(r, stepMs));
+      }
+    };
 
-    for (const phase of phases) {
-      setCurrentPhase(phase.name);
-      await new Promise(resolve => setTimeout(resolve, phase.duration));
-      setScanProgress(phase.progress);
-    }
+    try {
+      const [scanId] = await Promise.all([
+        onScanStart(target),   // real API call
+        animateProgress(),     // visual progress
+      ]);
 
-    // Generate scan ID and complete
-    const scanId = `scan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    setTimeout(() => {
+      setScanProgress(100);
+      setCurrentPhase('Scan complete!');
+      await new Promise(r => setTimeout(r, 400));
       onScanComplete(scanId);
-    }, 500);
+    } catch (err: any) {
+      setError(err.message || 'Scan failed. Is the backend running?');
+      setIsScanning(false);
+      setScanProgress(0);
+    }
   };
 
   return (
@@ -79,9 +91,7 @@ export function ScanInterface({ onScanComplete, onBack, onScanStart }: ScanInter
               {!isScanning ? (
                 <div className="space-y-6">
                   <div className="space-y-2">
-                    <Label htmlFor="email" className="text-slate-300">
-                      Email Address
-                    </Label>
+                    <Label htmlFor="email" className="text-slate-300">Email Address</Label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
                       <Input
@@ -96,9 +106,7 @@ export function ScanInterface({ onScanComplete, onBack, onScanStart }: ScanInter
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="domain" className="text-slate-300">
-                      Domain Name
-                    </Label>
+                    <Label htmlFor="domain" className="text-slate-300">Domain Name</Label>
                     <div className="relative">
                       <Globe className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
                       <Input
@@ -113,9 +121,7 @@ export function ScanInterface({ onScanComplete, onBack, onScanStart }: ScanInter
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="username" className="text-slate-300">
-                      Username
-                    </Label>
+                    <Label htmlFor="username" className="text-slate-300">Username</Label>
                     <div className="relative">
                       <User className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
                       <Input
@@ -130,9 +136,7 @@ export function ScanInterface({ onScanComplete, onBack, onScanStart }: ScanInter
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="ip" className="text-slate-300">
-                      IP Address (Optional)
-                    </Label>
+                    <Label htmlFor="ip" className="text-slate-300">IP Address (Optional)</Label>
                     <div className="relative">
                       <Server className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
                       <Input
@@ -146,14 +150,19 @@ export function ScanInterface({ onScanComplete, onBack, onScanStart }: ScanInter
                     </div>
                   </div>
 
+                  {error && (
+                    <div className="rounded-lg border border-red-800 bg-red-950/30 p-3 text-sm text-red-400">
+                      {error}
+                    </div>
+                  )}
+
                   <div className="rounded-lg border border-blue-900/50 bg-blue-950/20 p-4">
                     <h4 className="mb-2 font-semibold text-blue-400">Scan Coverage</h4>
                     <ul className="space-y-1 text-sm text-slate-300">
-                      <li>• Data breach correlation (HaveIBeenPwned)</li>
+                      <li>• Data breach correlation (LeakCheck, EmailRep, PwnedPasswords)</li>
                       <li>• WHOIS and DNS enumeration</li>
                       <li>• Network exposure analysis (Shodan)</li>
-                      <li>• Social media footprint mapping</li>
-                      <li>• EXIF metadata extraction</li>
+                      <li>• Social media footprint mapping (20 platforms)</li>
                       <li>• NLP-based threat detection</li>
                       <li>• ML-powered risk scoring</li>
                     </ul>
@@ -161,7 +170,7 @@ export function ScanInterface({ onScanComplete, onBack, onScanStart }: ScanInter
 
                   <Button
                     onClick={handleStartScan}
-                    disabled={!target.email && !target.domain && !target.username && !target.ipAddress}
+                    disabled={!hasTarget}
                     className="w-full bg-blue-600 hover:bg-blue-700"
                   >
                     Start Deep Scan
@@ -172,7 +181,7 @@ export function ScanInterface({ onScanComplete, onBack, onScanStart }: ScanInter
                   <div className="flex items-center justify-center">
                     <Loader2 className="h-16 w-16 animate-spin text-blue-500" />
                   </div>
-                  
+
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-slate-300">{currentPhase}</span>
@@ -182,7 +191,7 @@ export function ScanInterface({ onScanComplete, onBack, onScanStart }: ScanInter
                   </div>
 
                   <p className="text-center text-sm text-slate-400">
-                    This may take a few moments. Please do not close this window.
+                    This may take up to 30 seconds. Please do not close this window.
                   </p>
                 </div>
               )}
