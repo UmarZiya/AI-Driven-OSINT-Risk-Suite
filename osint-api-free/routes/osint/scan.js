@@ -66,10 +66,14 @@ router.post("/full", async (req, res) => {
       subScores.breach    = breachScore;
       results.breach      = {
         email,
-        breachCount: breaches.length,
-        riskScore:   breachScore,
-        riskLevel:   breachScore >= 70 ? "HIGH" : breachScore >= 35 ? "MEDIUM" : "LOW",
-        breaches,
+        breachCount:  breaches.breachCount || 0,
+        hasPasswords: breaches.hasPasswords || false,
+        suspicious:   breaches.suspicious   || false,
+        disposable:   breaches.disposable   || false,
+        reputation:   breaches.reputation   || null,
+        riskScore:    breachScore,
+        riskLevel:    breachScore >= 70 ? "HIGH" : breachScore >= 35 ? "MEDIUM" : "LOW",
+        breaches:     breaches.breachDetails || [],
       };
     } catch (err) {
       errors.breach = err.message;
@@ -113,18 +117,23 @@ router.post("/full", async (req, res) => {
       }
 
       if (resolvedIP) {
-        const shodanData    = await shodanHostLookup(resolvedIP);
-        const netScore      = calcNetworkRiskScore(shodanData);
-        subScores.network   = netScore;
-        results.network     = {
-          ip:         resolvedIP,
-          indexed:    !!shodanData,
-          riskScore:  netScore,
-          riskLevel:  netScore >= 60 ? "HIGH" : netScore >= 30 ? "MEDIUM" : "LOW",
-          openPorts:  shodanData?.ports || [],
-          vulnCount:  shodanData?.vulns ? Object.keys(shodanData.vulns).length : 0,
-          country:    shodanData?.country_name || null,
-          org:        shodanData?.org          || null,
+        const [shodanData, scannedPorts] = await Promise.all([
+          shodanHostLookup(resolvedIP),
+          scanPorts(resolvedIP),
+        ]);
+        const openPorts = shodanData?.ports || scannedPorts || [];
+        const vulns     = shodanData?.vulns ? Object.keys(shodanData.vulns) : [];
+        const netScore  = calcNetworkRiskScore(openPorts, vulns);
+        subScores.network = netScore;
+        results.network   = {
+          ip:        resolvedIP,
+          indexed:   !!shodanData,
+          riskScore: netScore,
+          riskLevel: netScore >= 60 ? "HIGH" : netScore >= 30 ? "MEDIUM" : "LOW",
+          openPorts,
+          vulnCount: vulns.length,
+          country:   shodanData?.country_name || null,
+          org:       shodanData?.org          || null,
         };
       }
     } catch (err) {
@@ -192,7 +201,7 @@ router.post("/full", async (req, res) => {
       finalScore,
       riskLevel,
       breakdown,
-      errors,
+      scanErrors: errors,
       scanType: "FULL",
     });
     savedScanId = saved._id;

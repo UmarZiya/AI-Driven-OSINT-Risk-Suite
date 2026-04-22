@@ -35,7 +35,7 @@ const ScanResultSchema = new mongoose.Schema(
     results: { type: mongoose.Schema.Types.Mixed, default: {} },
 
     // Module-level errors (non-fatal)
-    errors: { type: mongoose.Schema.Types.Mixed, default: {} },
+    scanErrors: { type: mongoose.Schema.Types.Mixed, default: {} },
 
     // Weighted breakdown
     breakdown: { type: mongoose.Schema.Types.Mixed, default: {} },
